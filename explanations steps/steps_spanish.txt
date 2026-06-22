@@ -21,3 +21,13 @@ Conectate con tu cliente favorito (DBeaver, pgAdmin, o la consola):
 bashdocker exec -it pg-rag psql -U postgres -d ragdb
 Y una vez adentro:
 sqlCREATE EXTENSION vector;
+
+Paso 4: Creá la tabla:
+
+CREATE TABLE document_chunks (
+    id SERIAL PRIMARY KEY,
+    document_name VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    embedding VECTOR(384),
+    created_at TIMESTAMP DEFAULT now()
+);

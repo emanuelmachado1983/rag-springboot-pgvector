@@ -16,6 +16,7 @@ Desarrollador backend senior, +18 años de experiencia, principalmente Java/Spri
 - Persistencia con **JDBC nativo (`JdbcTemplate`), no JPA**, para `document_chunks`: Hibernate no conoce el tipo `vector` de pgvector ni sus operadores de distancia, y la búsqueda por similitud necesita SQL nativo de todas formas. Detalle de la decisión en `DocumentChunkRepository`.
 - Binding de `float[]` al tipo `vector` de Postgres vía `com.pgvector:pgvector` (helper oficial, clase `PGvector`).
 - **Capa de LLM (Claude vía `langchain4j-anthropic`) ya implementada pero desactivada por default** (`rag.llm.enabled=false`). Se activa con esa property + variable de entorno `ANTHROPIC_API_KEY`. Si se prende sin la key, la app falla al arrancar (fail-fast) en vez de fallar en el primer request. Si la llamada al LLM falla en runtime, el endpoint cae de nuevo a devolver los chunks crudos (fallback), no rompe.
+- **Servidor MCP** (`spring-ai-starter-mcp-server-webmvc`, versión 1.1.8 de Spring AI) corriendo en el mismo proceso y puerto que el REST, transporte HTTP/SSE (`GET /sse` + `POST /mcp/message?sessionId=...`). Expone una sola tool, `buscar_documentos_relevantes`, que reutiliza directo `EmbeddingService` y `DocumentChunkRepository` (sin lógica duplicada). Se eligió SSE en vez de stdio para no tener que correr un segundo proceso separado del Spring Boot ya existente. Importante: Spring AI 2.0.0 usa Jackson 3 y rompe contra este stack (Spring Boot 3.5.x / Jackson 2) — por eso se fijó la versión en 1.1.8, no subir sin chequear esa incompatibilidad.
 
 ## Infraestructura
 
@@ -41,15 +42,27 @@ Desarrollador backend senior, +18 años de experiencia, principalmente Java/Spri
 - `llm/AnthropicConfig.java` — bean condicional del `ChatModel` de Claude, solo se crea si `rag.llm.enabled=true`; valida la API key al arrancar.
 - `llm/RagAnswerService.java` — arma el prompt con los chunks como contexto, llama al LLM, maneja el fallback si falla.
 - `llm/RagAnswerResponse.java` — DTO de la respuesta cuando la capa de LLM está activa.
+- `mcp/DocumentSearchTool.java` — tool MCP `buscar_documentos_relevantes`, llama a los mismos servicios que usa el controller REST.
+- `mcp/McpToolsConfig.java` — registra esa tool como `ToolCallbackProvider` para que el auto-config de Spring AI la exponga por MCP.
 
 ## Convenciones del proyecto
 
 - Mantener el proyecto simple, sin sobre-ingeniería — es un proyecto de aprendizaje, no un sistema productivo todavía.
 - Si hay más de una forma razonable de resolver algo, explicame brevemente las opciones y la razón de la elección, en vez de asumir en silencio.
 
+## Cómo conectar el servidor MCP
+
+Con la app corriendo (puerto 8082) y Docker/Postgres levantados:
+
+```
+claude mcp add --transport sse rag-docs http://localhost:8082/sse
+claude mcp list   # confirmar que rag-docs aparece conectado
+```
+
+Después, en cualquier sesión de Claude Code, preguntar algo que dependa de los documentos cargados (ej. "buscá en mis documentos algo sobre mascotas felinas") — Claude decide solo invocar la tool `buscar_documentos_relevantes`. Si la app deja de correr en ese puerto, `claude mcp list` la va a mostrar desconectada sin romper nada más; no hace falta sacarla salvo que cambie la URL/puerto.
+
 ## Próximos pasos posibles
 
 - **Activar y probar la capa de LLM en serio**: cargar crédito en la cuenta de Anthropic, prender `rag.llm.enabled=true` y validar el camino feliz (no solo el fail-fast, que ya está probado).
 - **Mejorar el chunking de documentos**: hoy `POST /api/documents` guarda el `content` tal cual como un solo chunk; un documento largo debería partirse en fragmentos más chicos (por párrafo o por tamaño fijo) antes de generar el embedding, para que la búsqueda sea más precisa.
-- **Exponer esto como servidor MCP**: envolver `search`/`ask` como tools de un servidor MCP permitiría que Claude Code (u otro cliente MCP) consulte este RAG directamente como fuente de contexto.
 - **Indexar `embedding` con HNSW o IVFFlat**: hoy la búsqueda hace un escaneo secuencial calculando distancia fila por fila, razonable con pocos chunks; un índice de pgvector sería el siguiente paso si la tabla crece.

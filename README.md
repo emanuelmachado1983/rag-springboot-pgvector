@@ -1,6 +1,6 @@
 # RAG App — búsqueda semántica sobre documentos propios
 
-Sistema RAG (Retrieval Augmented Generation) 100% en stack Java, hecho como proyecto de aprendizaje y portfolio. Permite cargar fragmentos de texto ("chunks"), generarles un embedding local, guardarlos en Postgres con `pgvector`, y después buscar los más parecidos semánticamente a una pregunta. Opcionalmente (desactivado por default), puede usar un LLM (Claude) para generar una respuesta en lenguaje natural a partir de esos chunks.
+Sistema RAG (Retrieval Augmented Generation) 100% en stack Java, hecho como proyecto de aprendizaje y portfolio. Permite cargar fragmentos de texto ("chunks"), generarles un embedding local, guardarlos en Postgres con `pgvector`, y después buscar los más parecidos semánticamente a una pregunta. Opcionalmente (desactivado por default), puede usar un LLM (Claude) para generar una respuesta en lenguaje natural a partir de esos chunks. También expone esa misma búsqueda como tool de un servidor MCP, para que un LLM (ej. Claude Code) la invoque directamente.
 
 ## Arquitectura
 
@@ -31,6 +31,16 @@ Sistema RAG (Retrieval Augmented Generation) 100% en stack Java, hecho como proy
                                        |
                                        v (si falla la llamada al LLM)
                                   fallback a chunks crudos
+
+
+        Cliente MCP (ej. Claude Code) -- GET /sse + POST /mcp/message
+                        |
+                        v
+        DocumentSearchTool.buscarDocumentosRelevantes(query, limit)
+                        |
+                        v
+        EmbeddingService.embed(query) -> DocumentChunkRepository.search()
+        (mismos beans que usa el endpoint REST, sin lógica duplicada)
 ```
 
 ## Stack
@@ -42,6 +52,7 @@ Sistema RAG (Retrieval Augmented Generation) 100% en stack Java, hecho como proy
   - Embeddings locales (`langchain4j-embeddings-all-minilm-l6-v2`, modelo ONNX embebido en el jar, corre en CPU, sin llamadas externas).
   - Cliente de Claude/Anthropic (`langchain4j-anthropic`), usado solo si se activa la capa de LLM.
 - [`com.pgvector:pgvector`](https://github.com/pgvector/pgvector-java): helper oficial para bindear `float[]` al tipo `vector` de Postgres desde JDBC.
+- [Spring AI](https://docs.spring.io/spring-ai/reference/) (`spring-ai-starter-mcp-server-webmvc`, versión 1.1.8) para exponer un servidor MCP en el mismo proceso/puerto, transporte HTTP/SSE. **Importante**: la versión 2.0.0 de Spring AI usa Jackson 3 y rompe contra este stack (Spring Boot 3.5.x trae Jackson 2) — no actualizar sin chequear esa incompatibilidad primero.
 
 ## Instalación y ejecución desde cero
 
@@ -126,6 +137,21 @@ Con `rag.llm.enabled=true`, el mismo endpoint devuelve una respuesta generada po
 
 Si la llamada a Claude falla (sin crédito, sin conexión, rate limit), `fallback` pasa a `true`, `answer` queda en `null` y `error` trae el detalle — el endpoint no rompe, simplemente degrada al modo retrieval-only.
 
+## Servidor MCP
+
+Además del REST, la búsqueda por similitud se expone como tool de un servidor MCP (`buscar_documentos_relevantes`), corriendo en el mismo proceso y puerto que el resto de la app, vía transporte HTTP/SSE.
+
+Con la app y Postgres corriendo, para conectarlo desde Claude Code:
+
+```bash
+claude mcp add --transport sse rag-docs http://localhost:8082/sse
+claude mcp list   # confirmar que rag-docs aparece conectado
+```
+
+Después, en cualquier sesión de Claude Code, basta con preguntar algo que dependa de los documentos cargados (ej. "buscá en mis documentos algo sobre mascotas felinas") — Claude decide solo cuándo invocar la tool. Si la app no está corriendo, `claude mcp list` la muestra desconectada sin romper nada más.
+
+Para probarlo manualmente sin un cliente MCP, el protocolo es JSON-RPC sobre SSE: `GET /sse` devuelve un `sessionId`, y los mensajes (`initialize`, `tools/list`, `tools/call`) se mandan por `POST /mcp/message?sessionId=...`, con las respuestas llegando por el stream SSE abierto.
+
 ## Cómo activar la capa de LLM
 
 1. Conseguir una API key de Anthropic con crédito cargado.
@@ -140,3 +166,4 @@ Con el flag en `false` (o sin setearlo), el comportamiento es exactamente el mis
 - **Embeddings locales en vez de una API paga**: el objetivo de esta etapa es tener ingestión + búsqueda semántica funcionando sin depender de crédito en ninguna cuenta. `all-MiniLM-L6-v2` corre en CPU vía ONNX, embebido en el jar de LangChain4j — cero llamadas externas, cero costo, ideal para aprender y para un portfolio que cualquiera pueda levantar sin configurar nada pago.
 - **JDBC en vez de JPA para `document_chunks`**: Hibernate no conoce el tipo `vector` de pgvector ni sus operadores de distancia (`<=>`, `<->`, `<#>`). Habría que escribir un `UserType` custom igual, y la búsqueda por similitud necesita SQL nativo de todas formas. Usar `JdbcTemplate` directo deja la query de pgvector visible y explícita, que es justo lo que se quiere entender en un proyecto de aprendizaje.
 - **Capa de LLM opcional y desactivable por property**: se construyó para poder probar el flujo de generación más adelante sin comprometerse a tener crédito en la cuenta de Anthropic desde ya. El bean de Claude (`AnthropicChatModel`) sólo se crea si `rag.llm.enabled=true` (vía `@ConditionalOnProperty`), y si está prendido pero falta la API key, la app falla al arrancar en vez de fallar silenciosamente en el primer request. Si la llamada al LLM falla en runtime, el endpoint cae de nuevo al modo retrieval-only en vez de romper.
+- **MCP por HTTP/SSE en el mismo proceso, en vez de stdio**: con stdio, un cliente como Claude Desktop lanzaría la app como subproceso y le hablaría por `stdin`/`stdout`, lo que implicaría correr un segundo proceso separado del Spring Boot web app que ya existe. Con SSE, el servidor MCP vive en el mismo puerto y `ApplicationContext`, así que la tool llama directo a los beans existentes (`EmbeddingService`, `DocumentChunkRepository`) sin duplicar lógica ni levantar nada aparte.

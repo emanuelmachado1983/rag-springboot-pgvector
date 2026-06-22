@@ -22,3 +22,13 @@ docker exec -it pg-rag psql -U postgres -d ragdb
 
 And once inside:
 CREATE EXTENSION vector;
+
+Step 4: create the table
+
+CREATE TABLE document_chunks (
+    id SERIAL PRIMARY KEY,
+    document_name VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    embedding VECTOR(384),
+    created_at TIMESTAMP DEFAULT now()
+);
