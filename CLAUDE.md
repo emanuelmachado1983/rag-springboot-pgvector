@@ -12,11 +12,12 @@ Desarrollador backend senior, +18 años de experiencia, principalmente Java/Spri
 
 - Java 21, Maven (con wrapper `mvnw`), Spring Boot 3.5.x.
 - 100% stack Java, sin Python.
-- Embeddings generados localmente con LangChain4j (`langchain4j-embeddings-all-minilm-l6-v2`, modelo `all-MiniLM-L6-v2`, 384 dimensiones, ONNX embebido en el jar) — sin depender de ninguna API de pago para esta parte.
+- Embeddings generados localmente con LangChain4j (`langchain4j-embeddings-all-minilm-l6-v2`, modelo `all-MiniLM-L6-v2`, 384 dimensiones, ONNX embebido en el jar) — sin depender de ninguna API de pago para esta parte. El modelo está mayormente entrenado en inglés: la búsqueda funciona en español, pero el usuario confirmó (probando a mano) que la precisión semántica es notablemente mejor con documentos/preguntas en inglés.
 - Persistencia con **JDBC nativo (`JdbcTemplate`), no JPA**, para `document_chunks`: Hibernate no conoce el tipo `vector` de pgvector ni sus operadores de distancia, y la búsqueda por similitud necesita SQL nativo de todas formas. Detalle de la decisión en `DocumentChunkRepository`.
 - Binding de `float[]` al tipo `vector` de Postgres vía `com.pgvector:pgvector` (helper oficial, clase `PGvector`).
 - **Capa de LLM (Claude vía `langchain4j-anthropic`) ya implementada pero desactivada por default** (`rag.llm.enabled=false`). Se activa con esa property + variable de entorno `ANTHROPIC_API_KEY`. Si se prende sin la key, la app falla al arrancar (fail-fast) en vez de fallar en el primer request. Si la llamada al LLM falla en runtime, el endpoint cae de nuevo a devolver los chunks crudos (fallback), no rompe.
 - **Servidor MCP** (`spring-ai-starter-mcp-server-webmvc`, versión 1.1.8 de Spring AI) corriendo en el mismo proceso y puerto que el REST, transporte HTTP/SSE (`GET /sse` + `POST /mcp/message?sessionId=...`). Expone una sola tool, `buscar_documentos_relevantes`, que reutiliza directo `EmbeddingService` y `DocumentChunkRepository` (sin lógica duplicada). Se eligió SSE en vez de stdio para no tener que correr un segundo proceso separado del Spring Boot ya existente. Importante: Spring AI 2.0.0 usa Jackson 3 y rompe contra este stack (Spring Boot 3.5.x / Jackson 2) — por eso se fijó la versión en 1.1.8, no subir sin chequear esa incompatibilidad.
+- **Chunking inteligente antes de generar el embedding**: `ChunkingService` usa `DocumentSplitters.recursive(maxChars, overlapChars)` de LangChain4j (módulo `dev.langchain4j:langchain4j`, separado de `langchain4j-core`) — corta primero por párrafo, después por oración, después por palabra, sin partir una idea a la mitad salvo que no quede otra opción. Tamaño y overlap configurables (`rag.chunking.max-chars=400`, `rag.chunking.overlap-chars=50`). Se eligió la librería ya usada en el proyecto en vez de reglas custom de fin-de-oración en español. **Cambio de contrato**: `POST /api/documents` ahora devuelve `{"ids": [...]}` (lista) en vez de `{"id": ...}` — un texto corto sigue generando una sola fila/id, pero dentro de una lista de un elemento.
 
 ## Infraestructura
 
@@ -36,9 +37,10 @@ Desarrollador backend senior, +18 años de experiencia, principalmente Java/Spri
 ## Estructura del código (`rag-app/src/main/java/com/example/ragapp`)
 
 - `embedding/EmbeddingService.java` — genera el embedding local de un texto.
+- `chunking/ChunkingService.java` — divide un texto largo en chunks (párrafo → oración → palabra, con overlap) antes de generar el embedding de cada uno.
 - `model/DocumentChunk.java`, `model/SearchResult.java` — records simples, no entidades JPA.
 - `repository/DocumentChunkRepository.java` — `JdbcTemplate` + pgvector, insert y búsqueda por distancia coseno (`<=>`).
-- `controller/DocumentController.java` — `POST /api/documents` (ingestión) y `GET /api/documents/search` (búsqueda, con o sin LLM según `rag.llm.enabled`).
+- `controller/DocumentController.java` — `POST /api/documents` (ingestión, ahora multi-chunk), `POST /api/documents/chunks/preview` (ver la división sin guardar nada) y `GET /api/documents/search` (búsqueda, con o sin LLM según `rag.llm.enabled`).
 - `llm/AnthropicConfig.java` — bean condicional del `ChatModel` de Claude, solo se crea si `rag.llm.enabled=true`; valida la API key al arrancar.
 - `llm/RagAnswerService.java` — arma el prompt con los chunks como contexto, llama al LLM, maneja el fallback si falla.
 - `llm/RagAnswerResponse.java` — DTO de la respuesta cuando la capa de LLM está activa.
@@ -64,5 +66,5 @@ Después, en cualquier sesión de Claude Code, preguntar algo que dependa de los
 ## Próximos pasos posibles
 
 - **Activar y probar la capa de LLM en serio**: cargar crédito en la cuenta de Anthropic, prender `rag.llm.enabled=true` y validar el camino feliz (no solo el fail-fast, que ya está probado).
-- **Mejorar el chunking de documentos**: hoy `POST /api/documents` guarda el `content` tal cual como un solo chunk; un documento largo debería partirse en fragmentos más chicos (por párrafo o por tamaño fijo) antes de generar el embedding, para que la búsqueda sea más precisa.
 - **Indexar `embedding` con HNSW o IVFFlat**: hoy la búsqueda hace un escaneo secuencial calculando distancia fila por fila, razonable con pocos chunks; un índice de pgvector sería el siguiente paso si la tabla crece.
+- **Ajustar el overlap del chunking**: en las pruebas, el overlap configurado (50 caracteres) no siempre generó texto duplicado visible entre chunks consecutivos cuando el corte caía justo en un límite de oración limpio — revisar si vale la pena forzarlo o si el comportamiento actual de LangChain4j ya es suficiente.

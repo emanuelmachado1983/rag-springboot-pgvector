@@ -8,13 +8,22 @@ Sistema RAG (Retrieval Augmented Generation) 100% en stack Java, hecho como proy
                  POST /api/documents
                         |
                         v
+                ChunkingService  (LangChain4j DocumentSplitters.recursive: párrafo -> oración -> palabra, con overlap)
+                        |
+                        v  (uno o más chunks)
                 EmbeddingService  (LangChain4j, modelo local all-MiniLM-L6-v2, 384 dims)
                         |
                         v
-              DocumentChunkRepository  (JDBC -> Postgres + pgvector)
+              DocumentChunkRepository  (JDBC -> Postgres + pgvector, una fila por chunk)
                         |
                         v
                   document_chunks  (tabla con columna "vector(384)")
+
+
+                 POST /api/documents/chunks/preview
+                        |
+                        v
+                ChunkingService  -- devuelve los chunks sin generar embeddings ni guardar nada
 
 
                  GET /api/documents/search?query=...
@@ -53,6 +62,7 @@ Sistema RAG (Retrieval Augmented Generation) 100% en stack Java, hecho como proy
   - Cliente de Claude/Anthropic (`langchain4j-anthropic`), usado solo si se activa la capa de LLM.
 - [`com.pgvector:pgvector`](https://github.com/pgvector/pgvector-java): helper oficial para bindear `float[]` al tipo `vector` de Postgres desde JDBC.
 - [Spring AI](https://docs.spring.io/spring-ai/reference/) (`spring-ai-starter-mcp-server-webmvc`, versión 1.1.8) para exponer un servidor MCP en el mismo proceso/puerto, transporte HTTP/SSE. **Importante**: la versión 2.0.0 de Spring AI usa Jackson 3 y rompe contra este stack (Spring Boot 3.5.x trae Jackson 2) — no actualizar sin chequear esa incompatibilidad primero.
+- Chunking inteligente vía el módulo `dev.langchain4j:langchain4j` (no `langchain4j-core`), que trae los `DocumentSplitter` ya implementados (`DocumentSplitters.recursive`).
 
 ## Instalación y ejecución desde cero
 
@@ -99,6 +109,8 @@ Por defecto la app escucha en el puerto configurado en `server.port` (`applicati
 
 ### Ingestar un documento
 
+El `content` se divide automáticamente en chunks (por párrafo/oración, con overlap) antes de generar los embeddings — un texto corto sigue generando una sola fila, uno largo puede generar varias.
+
 ```bash
 curl -X POST http://localhost:8082/api/documents \
   -H "Content-Type: application/json" \
@@ -106,7 +118,28 @@ curl -X POST http://localhost:8082/api/documents \
 ```
 
 ```json
-{ "id": 1 }
+{ "ids": [1] }
+```
+
+Con un texto más largo (varios párrafos), la respuesta trae un id por cada chunk generado: `{ "ids": [6, 7, 8, 9] }`.
+
+> **Nota de compatibilidad**: antes de agregar chunking, este endpoint devolvía `{ "id": 1 }` (singular). Ahora siempre devuelve `{ "ids": [...] }` (lista), aunque sea de un solo elemento.
+
+### Ver cómo queda dividido un texto antes de ingerirlo
+
+No genera embeddings ni guarda nada — solo corre el `ChunkingService` para poder revisar el resultado:
+
+```bash
+curl -X POST http://localhost:8082/api/documents/chunks/preview \
+  -H "Content-Type: application/json" \
+  -d '{"content":"Un texto largo con varios párrafos..."}'
+```
+
+```json
+[
+  { "index": 0, "length": 245, "content": "El sistema RAG combina dos técnicas..." },
+  { "index": 1, "length": 162, "content": "Estos vectores capturan el significado..." }
+]
 ```
 
 ### Buscar por similitud
@@ -136,6 +169,8 @@ Con `rag.llm.enabled=true`, el mismo endpoint devuelve una respuesta generada po
 ```
 
 Si la llamada a Claude falla (sin crédito, sin conexión, rate limit), `fallback` pasa a `true`, `answer` queda en `null` y `error` trae el detalle — el endpoint no rompe, simplemente degrada al modo retrieval-only.
+
+> **Nota sobre el idioma**: `all-MiniLM-L6-v2` está entrenado mayormente en inglés. La búsqueda funciona en español, pero los resultados son más precisos con documentos y preguntas en inglés. Si la precisión semántica importa más que mantener todo en español, conviene ingerir/preguntar en inglés.
 
 ## Servidor MCP
 
@@ -167,3 +202,4 @@ Con el flag en `false` (o sin setearlo), el comportamiento es exactamente el mis
 - **JDBC en vez de JPA para `document_chunks`**: Hibernate no conoce el tipo `vector` de pgvector ni sus operadores de distancia (`<=>`, `<->`, `<#>`). Habría que escribir un `UserType` custom igual, y la búsqueda por similitud necesita SQL nativo de todas formas. Usar `JdbcTemplate` directo deja la query de pgvector visible y explícita, que es justo lo que se quiere entender en un proyecto de aprendizaje.
 - **Capa de LLM opcional y desactivable por property**: se construyó para poder probar el flujo de generación más adelante sin comprometerse a tener crédito en la cuenta de Anthropic desde ya. El bean de Claude (`AnthropicChatModel`) sólo se crea si `rag.llm.enabled=true` (vía `@ConditionalOnProperty`), y si está prendido pero falta la API key, la app falla al arrancar en vez de fallar silenciosamente en el primer request. Si la llamada al LLM falla en runtime, el endpoint cae de nuevo al modo retrieval-only en vez de romper.
 - **MCP por HTTP/SSE en el mismo proceso, en vez de stdio**: con stdio, un cliente como Claude Desktop lanzaría la app como subproceso y le hablaría por `stdin`/`stdout`, lo que implicaría correr un segundo proceso separado del Spring Boot web app que ya existe. Con SSE, el servidor MCP vive en el mismo puerto y `ApplicationContext`, así que la tool llama directo a los beans existentes (`EmbeddingService`, `DocumentChunkRepository`) sin duplicar lógica ni levantar nada aparte.
+- **Chunking con LangChain4j en vez de reglas custom**: dividir texto en español respetando párrafos/oraciones (sin cortar una idea a la mitad) y agregando overlap entre fragmentos es un problema ya resuelto por el `DocumentSplitter` recursivo de LangChain4j (corta por párrafo, y si no entra, por oración, y si no entra, por palabra). Escribir esto a mano implicaría reinventar reglas de fin-de-oración en español y manejo de casos límite, sin ninguna ventaja sobre usar una librería que el proyecto ya integra para embeddings. Tamaño (400 caracteres) y overlap (50) quedaron como properties configurables (`rag.chunking.max-chars`, `rag.chunking.overlap-chars`) en vez de hardcodeados.
