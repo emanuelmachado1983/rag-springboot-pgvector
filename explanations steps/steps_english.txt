@@ -1,0 +1,24 @@
+Step 1
+Open a terminal (PowerShell or CMD) and run this:
+
+docker run --name pg-rag -e POSTGRES_PASSWORD=rag123 -e POSTGRES_DB=ragdb -p 5433:5432 -d pgvector/pgvector:pg16
+
+What each part does:
+--name pg-rag → names the container, so it's easy to manage later.
+-e POSTGRES_PASSWORD=rag123 → password for the postgres user (change it if you want, it's just for your local machine).
+-e POSTGRES_DB=ragdb → automatically creates a database called ragdb.
+-p 5433:5432 → maps port 5433 on your machine to port 5432 in the container (so it doesn't clash with your official Postgres, which already uses 5432).
+-d → runs in the background.
+pgvector/pgvector:pg16 → the image with Postgres 16 + pgvector already installed.
+
+Step 2: check that it's running
+docker ps
+You should see a row with pg-rag and status Up.
+
+Step 3: connect and enable the extension
+Connect with your favorite client (DBeaver, pgAdmin, or the console):
+
+docker exec -it pg-rag psql -U postgres -d ragdb
+
+And once inside:
+CREATE EXTENSION vector;
