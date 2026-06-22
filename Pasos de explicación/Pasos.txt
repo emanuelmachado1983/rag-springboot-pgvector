@@ -1,0 +1,23 @@
+
+Paso 1
+
+Abrí una terminal (PowerShell o CMD) y corré esto:
+bashdocker run --name pg-rag -e POSTGRES_PASSWORD=rag123 -e POSTGRES_DB=ragdb -p 5433:5432 -d pgvector/pgvector:pg16
+Qué hace cada parte:
+
+--name pg-rag → le pone nombre al contenedor, para manejarlo fácil después.
+-e POSTGRES_PASSWORD=rag123 → contraseña del usuario postgres (cambiala si querés, es solo para tu PC local).
+-e POSTGRES_DB=ragdb → crea automáticamente una base llamada ragdb.
+-p 5433:5432 → mapea el puerto 5433 de tu PC al 5432 del contenedor (así no choca con tu Postgres oficial que ya usa el 5432).
+-d → corre en segundo plano.
+pgvector/pgvector:pg16 → la imagen con Postgres 16 + pgvector ya instalado.
+
+Paso 2: verificar que está corriendo
+bashdocker ps
+Deberías ver una fila con pg-rag y estado Up.
+
+Paso 3: conectarte y activar la extensión
+Conectate con tu cliente favorito (DBeaver, pgAdmin, o la consola):
+bashdocker exec -it pg-rag psql -U postgres -d ragdb
+Y una vez adentro:
+sqlCREATE EXTENSION vector;

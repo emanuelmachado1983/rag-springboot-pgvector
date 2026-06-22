@@ -1,0 +1,129 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-06-19T18:30:00.000Z",
+  "__export_source": "insomnia.desktop.app:v2023.5.8",
+  "resources": [
+    {
+      "_id": "wrk_rag_app",
+      "_type": "workspace",
+      "parentId": null,
+      "name": "RAG App - document_chunks",
+      "description": "Ejemplos de ingestión y búsqueda por similitud para el proyecto RAG (Spring Boot + pgvector + LangChain4j).",
+      "scope": "collection"
+    },
+    {
+      "_id": "env_base_rag_app",
+      "_type": "environment",
+      "parentId": "wrk_rag_app",
+      "name": "Base Environment",
+      "data": {
+        "baseUrl": "http://localhost:8082"
+      },
+      "dataPropertyOrder": { "&": ["baseUrl"] },
+      "color": null,
+      "isPrivate": false,
+      "metaSortKey": 0
+    },
+    {
+      "_id": "fld_post_ingest",
+      "_type": "request_group",
+      "parentId": "wrk_rag_app",
+      "name": "POST /api/documents (ingest)",
+      "metaSortKey": -3
+    },
+    {
+      "_id": "req_post_gato",
+      "_type": "request",
+      "parentId": "fld_post_ingest",
+      "name": "Ingest - gato",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/documents",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"documentName\": \"animales.txt\",\n  \"content\": \"El gato es un animal domestico muy popular como mascota\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": -3
+    },
+    {
+      "_id": "req_post_perro",
+      "_type": "request",
+      "parentId": "fld_post_ingest",
+      "name": "Ingest - perro",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/documents",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"documentName\": \"animales.txt\",\n  \"content\": \"Los perros son leales y necesitan mucho ejercicio diario\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": -2
+    },
+    {
+      "_id": "req_post_finanzas",
+      "_type": "request",
+      "parentId": "fld_post_ingest",
+      "name": "Ingest - finanzas",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/documents",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"documentName\": \"finanzas.txt\",\n  \"content\": \"La tasa de interes del banco central subio este mes\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": -1
+    },
+    {
+      "_id": "fld_get_search",
+      "_type": "request_group",
+      "parentId": "wrk_rag_app",
+      "name": "GET /api/documents/search",
+      "metaSortKey": -2
+    },
+    {
+      "_id": "req_get_mascotas",
+      "_type": "request",
+      "parentId": "fld_get_search",
+      "name": "Search - mascotas felinas",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/documents/search",
+      "body": {},
+      "headers": [],
+      "parameters": [
+        { "name": "query", "value": "mascotas felinas" },
+        { "name": "limit", "value": "3" }
+      ],
+      "authentication": {},
+      "metaSortKey": -2
+    },
+    {
+      "_id": "req_get_finanzas",
+      "_type": "request",
+      "parentId": "fld_get_search",
+      "name": "Search - economia y tasas bancarias",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/documents/search",
+      "body": {},
+      "headers": [],
+      "parameters": [
+        { "name": "query", "value": "economia y tasas bancarias" },
+        { "name": "limit", "value": "3" }
+      ],
+      "authentication": {},
+      "metaSortKey": -1
+    }
+  ]
+}
