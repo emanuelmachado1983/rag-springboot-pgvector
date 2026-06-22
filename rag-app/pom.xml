@@ -91,6 +91,12 @@
 			<artifactId>langchain4j-anthropic</artifactId>
 			<version>${langchain4j.version}</version>
 		</dependency>
+		<!-- Módulo "langchain4j" (no langchain4j-core): trae los DocumentSplitter ya implementados (DocumentSplitters.recursive) -->
+		<dependency>
+			<groupId>dev.langchain4j</groupId>
+			<artifactId>langchain4j</artifactId>
+			<version>${langchain4j.version}</version>
+		</dependency>
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

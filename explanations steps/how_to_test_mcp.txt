@@ -1,0 +1,39 @@
+
+SPANISH
+
+1. Abre una terminal y corré (esto es usando claude):
+claude mcp add --transport sse rag-docs http://localhost:8082/sse
+Esto registra el servidor MCP en tu configuración de Claude Code (queda guardado, no hace falta repetirlo cada vez).
+
+2. Verificá que quedó conectado:
+claude mcp list
+Debería aparecer rag-docs con estado conectado.
+
+3. Empezá una sesión nueva de Claude Code (en el directorio que quieras) y simplemente preguntale algo que dependa de
+los documentos que ya cargamos, por ejemplo:
+"Buscá en mis documentos algo sobre mascotas felinas"
+
+4. Claude debería decidir solo invocar la tool buscar_documentos_relevantes (vas a ver en la transcripción que usa una
+tool MCP) y devolverte los chunks que indexamos antes (el del gato, el del perro).
+
+Importante: la app tiene que seguir corriendo en el puerto 8082 mientras uses esto (ya está corriendo ahora). Si la
+reiniciás en otro puerto, hay que volver a hacer claude mcp add con la URL nueva, o sacar la vieja con claude mcp
+remove rag-docs primero.
+
+
+ENGLISH
+
+1. Open a terminal and run (this is using claude):
+claude mcp add --transport sse rag-docs http://localhost:8082/sse
+This registers the MCP server in your Claude Code configuration (it's saved, so you don't need to repeat it every time).
+ 
+2. Verify that it connected:
+claude mcp list
+You should see rag-docs with a connected status.
+ 
+3. Start a new Claude Code session (in whatever directory you want) and just ask it something that depends on the documents we already loaded, for example:
+"Search my documents for something about cats"
+ 
+4. Claude should decide on its own to invoke the buscar_documentos_relevantes tool (you'll see in the transcript that it uses an MCP tool) and return the chunks we indexed earlier (the one about the cat, the one about the dog).
+ 
+Important: the app needs to keep running on port 8082 while you use this (it's already running now). If you restart it on a different port, you'll need to run claude mcp add again with the new URL, or remove the old one first with claude mcp remove rag-docs.
