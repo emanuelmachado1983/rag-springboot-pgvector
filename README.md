@@ -50,6 +50,9 @@ Sistema RAG (Retrieval Augmented Generation) 100% en stack Java, hecho como proy
                         v
         EmbeddingService.embed(query) -> DocumentChunkRepository.search()
         (mismos beans que usa el endpoint REST, sin lógica duplicada)
+                        |
+                        v (a criterio del LLM orquestador, no automático)
+        SummarizeChunksTool.resumirChunks(chunks)  --> Claude --> resumen único
 ```
 
 ## Stack
@@ -174,7 +177,10 @@ Si la llamada a Claude falla (sin crédito, sin conexión, rate limit), `fallbac
 
 ## Servidor MCP
 
-Además del REST, la búsqueda por similitud se expone como tool de un servidor MCP (`buscar_documentos_relevantes`), corriendo en el mismo proceso y puerto que el resto de la app, vía transporte HTTP/SSE.
+Además del REST, el servidor MCP (corriendo en el mismo proceso y puerto que el resto de la app, vía transporte HTTP/SSE) expone dos tools:
+
+- **`buscar_documentos_relevantes`**: la misma búsqueda por similitud del endpoint REST (`query`, `limit` opcional). Devuelve los chunks crudos, ordenados por distancia coseno.
+- **`resumir_chunks`**: recibe una lista de fragmentos (típicamente los que devolvió `buscar_documentos_relevantes`) y los combina en un resumen único, eliminando redundancia. Pensada para "function calling encadenado": el LLM orquestador puede llamarla por su cuenta después de buscar, si decide que conviene sintetizar en vez de mostrar los chunks crudos — el criterio sugerido en su descripción es "más de 3 fragmentos". Esta decisión queda **100% a criterio del LLM**, no hay nada en el servidor que la fuerce (se probó forzarla y se volvió atrás, ver Decisiones de diseño). Requiere `rag.llm.enabled=true`; si está apagado, devuelve un resultado con `fallback=true` en vez de fallar.
 
 Con la app y Postgres corriendo, para conectarlo desde Claude Code:
 
@@ -183,7 +189,7 @@ claude mcp add --transport sse rag-docs http://localhost:8082/sse
 claude mcp list   # confirmar que rag-docs aparece conectado
 ```
 
-Después, en cualquier sesión de Claude Code, basta con preguntar algo que dependa de los documentos cargados (ej. "buscá en mis documentos algo sobre mascotas felinas") — Claude decide solo cuándo invocar la tool. Si la app no está corriendo, `claude mcp list` la muestra desconectada sin romper nada más.
+Después, en cualquier sesión de Claude Code, basta con preguntar algo que dependa de los documentos cargados (ej. "buscá en mis documentos algo sobre mascotas felinas") — Claude decide solo cuándo invocar cada tool. Si la app no está corriendo, `claude mcp list` la muestra desconectada sin romper nada más.
 
 Para probarlo manualmente sin un cliente MCP, el protocolo es JSON-RPC sobre SSE: `GET /sse` devuelve un `sessionId`, y los mensajes (`initialize`, `tools/list`, `tools/call`) se mandan por `POST /mcp/message?sessionId=...`, con las respuestas llegando por el stream SSE abierto.
 
@@ -203,3 +209,4 @@ Con el flag en `false` (o sin setearlo), el comportamiento es exactamente el mis
 - **Capa de LLM opcional y desactivable por property**: se construyó para poder probar el flujo de generación más adelante sin comprometerse a tener crédito en la cuenta de Anthropic desde ya. El bean de Claude (`AnthropicChatModel`) sólo se crea si `rag.llm.enabled=true` (vía `@ConditionalOnProperty`), y si está prendido pero falta la API key, la app falla al arrancar en vez de fallar silenciosamente en el primer request. Si la llamada al LLM falla en runtime, el endpoint cae de nuevo al modo retrieval-only en vez de romper.
 - **MCP por HTTP/SSE en el mismo proceso, en vez de stdio**: con stdio, un cliente como Claude Desktop lanzaría la app como subproceso y le hablaría por `stdin`/`stdout`, lo que implicaría correr un segundo proceso separado del Spring Boot web app que ya existe. Con SSE, el servidor MCP vive en el mismo puerto y `ApplicationContext`, así que la tool llama directo a los beans existentes (`EmbeddingService`, `DocumentChunkRepository`) sin duplicar lógica ni levantar nada aparte.
 - **Chunking con LangChain4j en vez de reglas custom**: dividir texto en español respetando párrafos/oraciones (sin cortar una idea a la mitad) y agregando overlap entre fragmentos es un problema ya resuelto por el `DocumentSplitter` recursivo de LangChain4j (corta por párrafo, y si no entra, por oración, y si no entra, por palabra). Escribir esto a mano implicaría reinventar reglas de fin-de-oración en español y manejo de casos límite, sin ninguna ventaja sobre usar una librería que el proyecto ya integra para embeddings. Tamaño (400 caracteres) y overlap (50) quedaron como properties configurables (`rag.chunking.max-chars`, `rag.chunking.overlap-chars`) en vez de hardcodeados.
+- **`resumir_chunks` queda como tool MCP independiente, no forzada desde el servidor**: la idea original era que el LLM orquestador la invocara solo después de `buscar_documentos_relevantes` cuando hubiera más de 3 fragmentos. Probado a mano, no fue confiable — con preguntas neutras (ej. "talk me about canaries") el LLM sintetiza la respuesta final él mismo a partir de los chunks crudos y nunca llega a invocar la segunda tool, aun superando ese umbral. Se probó la alternativa de forzarlo en el servidor (que `DocumentSearchTool` llamara directo a la lógica de resumen cuando `chunks.size() > 3`, sin pasar por el LLM) y funcionaba de forma determinística, pero se descartó: la decisión de cuándo sintetizar se quiere dejar en manos del LLM orquestador, aceptando que no siempre la tome.
